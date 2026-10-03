@@ -3,6 +3,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ensureAdminRole } from "@/lib/admin.functions";
+import { criarContaAdministrador } from "@/lib/auth.functions";
 import { Lock, Mail, LogIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { garantirLojaDoUsuario, setActiveOrganization } from "@/lib/saas";
@@ -25,6 +26,7 @@ export const Route = createFileRoute("/auth")({
 function AuthPage() {
   const navigate = useNavigate();
   const garantirAdmin = useServerFn(ensureAdminRole);
+  const criarConta = useServerFn(criarContaAdministrador);
   const [nomeLoja, setNomeLoja] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
@@ -98,28 +100,21 @@ function AuthPage() {
           throw new Error("Informe o nome da sua loja.");
         }
 
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: senha,
-          options: {
-            emailRedirectTo: window.location.origin,
-            data: {
-              full_name: nomeNormalizado,
-              store_name: nomeNormalizado,
-            },
+        await criarConta({
+          data: {
+            email,
+            password: senha,
+            storeName: nomeNormalizado,
           },
         });
 
-        if (error) throw error;
-
-        // Quando a confirmação de e-mail está ativada, a sessão ainda não
-        // existe. A loja será criada automaticamente no primeiro login.
-        if (!data.session) {
-          setMsg(
-            "Conta criada. Confirme seu e-mail e depois entre novamente. Sua loja será criada automaticamente.",
-          );
-          return;
-        }
+        // O cadastro é criado no servidor com e-mail já confirmado.
+        // Em seguida entramos normalmente para obter a sessão do usuário.
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email,
+          password: senha,
+        });
+        if (loginError) throw loginError;
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
@@ -143,7 +138,7 @@ function AuthPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           {modo === "recuperar"
             ? "Informe seu e-mail para recuperar a senha."
-            : "Entre ou crie sua conta para administrar sua própria loja."}
+            : "Entre ou crie sua conta para administrar sua própria loja. Os cadastros feitos aqui já ficam com o e-mail validado."}
         </p>
 
         <form onSubmit={submeter} className="mt-6 space-y-4">
