@@ -1,29 +1,33 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 const ADMIN_EMAILS = ["diano.baiano2015@gmail.com"];
 
 /**
- * Concede o papel de administrador para os e-mails autorizados da loja.
- * Chamada logo após o login.
+ * Garante que o e-mail global autorizado tenha o papel admin e, para os
+ * demais usuários, retorna somente as lojas das memberships próprias.
+ *
+ * A loja de cada administrador é criada como membership "owner", que é
+ * reconhecida pelas políticas do tenant como permissão administrativa.
  */
 export const ensureAdminRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const claims = context.claims as { email?: string } | null;
-    const email = claims?.email?.toLowerCase();
-    const isGlobalAdminEmail = Boolean(email && ADMIN_EMAILS.includes(email));
+    const email = claims?.email?.toLowerCase() ?? "";
+    const isGlobalAdminEmail = ADMIN_EMAILS.includes(email);
     let admin = false;
 
     if (isGlobalAdminEmail) {
-      const { data: role, error } = await context.supabase
+      const { error: roleError } = await supabaseAdmin
         .from("user_roles")
-        .select("role")
-        .eq("user_id", context.userId)
-        .eq("role", "admin")
-        .maybeSingle();
+        .upsert(
+          { user_id: context.userId, role: "admin" },
+          { onConflict: "user_id,role", ignoreDuplicates: true },
+        );
 
-      admin = !error && role?.role === "admin";
+      admin = !roleError;
     }
 
     if (admin) {
@@ -41,7 +45,7 @@ export const ensureAdminRole = createServerFn({ method: "POST" })
 
     const { data: memberships, error: membershipsError } = await context.supabase
       .from("organization_members")
-      .select("organization_id")
+      .select("organization_id,role")
       .eq("user_id", context.userId);
 
     if (membershipsError) {
